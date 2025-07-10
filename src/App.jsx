@@ -443,7 +443,7 @@ export default function TriangleSynth() {
               textShadow: '0 2px 4px rgba(0,0,0,0.1)',
             }}
           >
-            🎛️ UI Microinteraction Sound Generator
+            UI Sound Generator
           </Typography>
           <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
             Press any <Chip label="A–Z" size="small" color="primary" /> key to generate a pleasant UI sound effect.
