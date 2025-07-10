@@ -35,6 +35,7 @@ import {
   Clear,
   Star,
   Headphones,
+  Delete,
 } from '@mui/icons-material';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
@@ -106,7 +107,71 @@ export default function TriangleSynth() {
   const mediaRecorderRef = useRef(null);
   const [soundLog, setSoundLog] = useState([]);
   const [recordings, setRecordings] = useState([]);
-  const [savedSounds, setSavedSounds] = useState([]);
+
+  // Helper functions for blob/base64 conversion (moved before useState)
+  const blobToBase64 = (blob) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  const base64ToBlob = (base64, type) => {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type });
+  };
+
+  const [savedSounds, setSavedSounds] = useState(() => {
+    console.log('Initializing saved sounds from localStorage...');
+    const saved = localStorage.getItem('savedSounds');
+    if (saved) {
+      try {
+        console.log('Found saved sounds in localStorage, parsing...');
+        const parsedSounds = JSON.parse(saved);
+        console.log('Parsed sounds count:', parsedSounds.length);
+        // Convert base64 back to blobs
+        const convertedSounds = parsedSounds.map(sound => ({
+          name: sound.name,
+          blob: base64ToBlob(sound.blobData, 'audio/ogg'),
+          blobData: sound.blobData,
+          timestamp: sound.timestamp
+        }));
+        console.log('Successfully loaded saved sounds:', convertedSounds.length);
+        return convertedSounds;
+      } catch (e) {
+        console.error('Error loading saved sounds:', e);
+        return [];
+      }
+    }
+    console.log('No saved sounds found in localStorage');
+    return [];
+  });
+
+  // Save sounds to localStorage
+  const saveSoundsToStorage = async (sounds) => {
+    try {
+      console.log('Converting sounds for storage, count:', sounds.length);
+      const soundsForStorage = await Promise.all(
+        sounds.map(async (sound) => ({
+          name: sound.name,
+          blobData: sound.blobData || await blobToBase64(sound.blob),
+          timestamp: sound.timestamp || Date.now()
+        }))
+      );
+      console.log('Sounds converted for storage, saving to localStorage...');
+      localStorage.setItem('savedSounds', JSON.stringify(soundsForStorage));
+      console.log('Successfully saved to localStorage');
+    } catch (error) {
+      console.error('Error saving to localStorage:', error);
+    }
+  };
 
   // State for select boxes
   const [interactionType, setInteractionType] = useState(INTERACTION_TYPES[0]);
@@ -118,10 +183,24 @@ export default function TriangleSynth() {
   const [beatCount, setBeatCount] = useState(1);
   const [beatDelay, setBeatDelay] = useState(200); // ms
   const [beatDialogOpen, setBeatDialogOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = async (e) => {
-      if (!/^[a-zA-Z]$/.test(e.key)) return;
+      // Define keyboard layout progression from Q to M (left to right, top to bottom)
+      const keyboardProgression = [
+        'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p',  // Top row
+        'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l',       // Middle row
+        'z', 'x', 'c', 'v', 'b', 'n', 'm'                  // Bottom row
+      ];
+      
+      const keyIndex = keyboardProgression.indexOf(e.key.toLowerCase());
+      
+      // Only respond to keys in our progression
+      if (keyIndex === -1) return;
+
+      // Calculate progression factor (0 to 1) based on key position
+      const progressionFactor = keyIndex / (keyboardProgression.length - 1);
 
       // Envelope/duration calculation
       let attack = 0.005,
@@ -199,7 +278,7 @@ export default function TriangleSynth() {
       // Generate multiple beats
       for (let i = 0; i < beatCount; i++) {
         const beatStartTime = audioCtx.currentTime + (i * beatInterval);
-        generateBeat(audioCtx, dest, beatStartTime, attack, release, finalDuration);
+        generateBeat(audioCtx, dest, beatStartTime, attack, release, finalDuration, progressionFactor);
       }
       
       // Stop recording after all beats are complete
@@ -209,15 +288,24 @@ export default function TriangleSynth() {
     };
     
     // Function to generate a single beat
-    const generateBeat = (audioCtx, dest, startTime, attack, release, baseDuration) => {
-      // --- SOUND PARAMS BASED ON SELECTIONS ---
-      // Pitch/frequency
-      let baseFreq = 800;
-      if (pitch === "high") baseFreq = 1200 + Math.random() * 400;
-      else if (pitch === "mid") baseFreq = 500 + Math.random() * 300;
-      else if (pitch === "low") baseFreq = 180 + Math.random() * 200;
-      else if (pitch === "rising") baseFreq = 400 + Math.random() * 200;
-      else if (pitch === "falling") baseFreq = 1000 - Math.random() * 400;
+    const generateBeat = (audioCtx, dest, startTime, attack, release, baseDuration, progressionFactor) => {
+      // --- SOUND PARAMS BASED ON SELECTIONS AND PROGRESSION ---
+      // Base frequency progression: Start low and go higher
+      let baseFreq;
+      if (pitch === "high") {
+        baseFreq = 800 + (progressionFactor * 800); // 800Hz to 1600Hz
+      } else if (pitch === "mid") {
+        baseFreq = 400 + (progressionFactor * 600); // 400Hz to 1000Hz
+      } else if (pitch === "low") {
+        baseFreq = 200 + (progressionFactor * 400); // 200Hz to 600Hz
+      } else if (pitch === "rising") {
+        baseFreq = 300 + (progressionFactor * 500); // 300Hz to 800Hz, will rise further
+      } else if (pitch === "falling") {
+        baseFreq = 1000 - (progressionFactor * 400); // 1000Hz to 600Hz, will fall further
+      } else {
+        // Default progressive scale
+        baseFreq = 300 + (progressionFactor * 700); // 300Hz to 1000Hz
+      }
 
       // Interaction Type modifications
       let interactionGainMultiplier = 1;
@@ -273,17 +361,17 @@ export default function TriangleSynth() {
       let tonalFreqMultiplier = 1;
       let tonalGainMultiplier = 1;
       if (tonalQuality === "atonal") {
-        // Add slight detuning for atonal effect
-        baseFreq *= (0.95 + Math.random() * 0.1); // Random detuning
+        // Add slight detuning for atonal effect, but keep progression
+        baseFreq *= (0.98 + (progressionFactor * 0.04)); // Slight progressive detuning
       } else if (tonalQuality === "pitched") {
-        // Clean, precise pitch
-        tonalFreqMultiplier = 1.0; // No modification
+        // Clean, precise pitch - no modification needed
+        tonalFreqMultiplier = 1.0;
       } else if (tonalQuality === "harmonic") {
         // Add harmonic richness
         tonalGainMultiplier = 1.1;
       } else if (tonalQuality === "dissonant") {
-        // Add dissonance with slight detuning
-        baseFreq *= (0.92 + Math.random() * 0.16); // More random detuning
+        // Add progressive dissonance
+        baseFreq *= (0.95 + (progressionFactor * 0.1)); // Progressive detuning
         tonalGainMultiplier = 0.9;
       }
 
@@ -334,7 +422,7 @@ export default function TriangleSynth() {
 
       // Sound generation
       if (oscType === "noise") {
-        // Noise burst
+        // Noise burst with progressive filtering
         const bufferSize = audioCtx.sampleRate * finalDuration;
         const buffer = audioCtx.createBuffer(
           1,
@@ -411,15 +499,96 @@ export default function TriangleSynth() {
   };
 
   // Save a sound to the saved list
-  const handleSaveSound = (rec) => {
-    setSavedSounds((prev) => {
-      // Avoid duplicates by name and blob size
-      if (
-        prev.some((s) => s.name === rec.name && s.blob.size === rec.blob.size)
-      )
-        return prev;
-      return [...prev, rec];
-    });
+  const handleSaveSound = async (rec) => {
+    console.log('Attempting to save sound:', rec.name);
+    setIsSaving(true);
+    
+    // Check for duplicates
+    const isDuplicate = savedSounds.some(
+      (s) => s.name === rec.name && s.blob.size === rec.blob.size
+    );
+    if (isDuplicate) {
+      console.log('Sound already exists, skipping save');
+      setIsSaving(false);
+      return;
+    }
+
+    try {
+      console.log('Converting blob to base64...');
+      // Convert blob to base64 for the new sound
+      const base64Data = await blobToBase64(rec.blob);
+      console.log('Base64 conversion successful, length:', base64Data.length);
+      
+      const soundWithData = {
+        name: rec.name,
+        blob: rec.blob,
+        blobData: base64Data,
+        timestamp: Date.now()
+      };
+
+      console.log('Setting saved sounds state, count:', savedSounds.length + 1);
+      setSavedSounds(prev => {
+        const newSavedSounds = [...prev, soundWithData];
+        
+        // Save to localStorage synchronously after state update
+        setTimeout(async () => {
+          try {
+            console.log('Saving to localStorage...');
+            await saveSoundsToStorage(newSavedSounds);
+            console.log('Save to localStorage completed');
+          } catch (error) {
+            console.error('Error saving to localStorage:', error);
+          }
+        }, 0);
+        
+        return newSavedSounds;
+      });
+      
+    } catch (error) {
+      console.error('Error saving sound:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteSavedSound = async (index) => {
+    const newSaved = savedSounds.filter((_, i) => i !== index);
+    setSavedSounds(newSaved);
+    
+    // Update localStorage
+    if (newSaved.length > 0) {
+      await saveSoundsToStorage(newSaved);
+    } else {
+      localStorage.removeItem('savedSounds');
+    }
+  };
+
+  const handleClearSavedSounds = () => {
+    setSavedSounds([]);
+    localStorage.removeItem('savedSounds');
+  };
+
+  // Test localStorage functionality
+  const testLocalStorage = () => {
+    try {
+      // Test basic localStorage
+      localStorage.setItem('test', 'hello');
+      const testValue = localStorage.getItem('test');
+      console.log('Basic localStorage test:', testValue);
+      localStorage.removeItem('test');
+      
+      // Test with JSON
+      const testObj = { name: 'test', data: 'hello world' };
+      localStorage.setItem('testObj', JSON.stringify(testObj));
+      const retrievedObj = JSON.parse(localStorage.getItem('testObj'));
+      console.log('JSON localStorage test:', retrievedObj);
+      localStorage.removeItem('testObj');
+      
+      alert('localStorage test passed! Check console for details.');
+    } catch (error) {
+      console.error('localStorage test failed:', error);
+      alert('localStorage test failed! Check console for details.');
+    }
   };
 
   return (
@@ -433,10 +602,10 @@ export default function TriangleSynth() {
     >
       <Container maxWidth="lg">
         <Box sx={{ textAlign: 'center', mb: 6 }}>
-          <Typography
-            variant="h3"
-            component="h1"
-            sx={{
+                      <Typography
+              variant="h3"
+              component="h1"
+              sx={{
               fontWeight: 700,
               color: theme.palette.primary.main,
               mb: 2,
@@ -446,11 +615,19 @@ export default function TriangleSynth() {
             UI Sound Generator
           </Typography>
           <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
-            Press any <Chip label="A–Z" size="small" color="primary" /> key to generate a pleasant UI sound effect.
+            Press keys <Chip label="Q→M" size="small" color="primary" /> to generate progressive UI sound effects.
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Each sound is recorded and available for download below.
+            Sounds progress from low to high pitch across the keyboard layout (Q-W-E-R-T-Y-U-I-O-P, A-S-D-F-G-H-J-K-L, Z-X-C-V-B-N-M).
           </Typography>
+          <Button 
+            variant="outlined" 
+            onClick={testLocalStorage}
+            sx={{ mt: 2 }}
+            size="small"
+          >
+            Test localStorage
+          </Button>
         </Box>
 
         {/* Controls Section */}
@@ -699,7 +876,7 @@ export default function TriangleSynth() {
                               onClick={() => handleSaveSound(rec)}
                               color="success"
                               size="small"
-                              disabled={savedSounds.some(
+                              disabled={isSaving || savedSounds.some(
                                 (s) => s.name === rec.name && s.blob.size === rec.blob.size
                               )}
                             >
@@ -776,6 +953,13 @@ export default function TriangleSynth() {
                             >
                               <Download />
                             </IconButton>
+                            <IconButton
+                              onClick={() => handleDeleteSavedSound(idx)}
+                              color="error"
+                              size="small"
+                            >
+                              <Delete />
+                            </IconButton>
                           </Box>
                         }
                       >
@@ -792,6 +976,18 @@ export default function TriangleSynth() {
                   </List>
                 )}
               </Box>
+              <Divider sx={{ my: 1 }} />
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<Clear />}
+                onClick={handleClearSavedSounds}
+                disabled={savedSounds.length === 0}
+                size="small"
+                fullWidth
+              >
+                Clear All Saved Sounds
+              </Button>
             </CardContent>
           </Card>
         </Box>
