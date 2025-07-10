@@ -16,6 +16,7 @@
     "@mui/material": "^7.2.0",
     "file-save": "^0.2.0",
     "file-saver": "^2.0.5",
+    "jszip": "^3.10.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
