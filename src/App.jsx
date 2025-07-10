@@ -20,6 +20,13 @@ import {
   Paper,
   Divider,
   useTheme,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Slider,
+  IconButton as MuiIconButton,
+  TextField,
 } from '@mui/material';
 import {
   PlayArrow,
@@ -29,6 +36,8 @@ import {
   Star,
   Headphones,
 } from '@mui/icons-material';
+import AddIcon from '@mui/icons-material/Add';
+import RemoveIcon from '@mui/icons-material/Remove';
 
 const INTERACTION_TYPES = [
   "click",
@@ -89,6 +98,7 @@ const EMOTIONS = [
   "urgent",
   "informative",
 ];
+const BEAT_COUNTS = [1, 2, 3]; // (no longer used as dropdown)
 
 export default function TriangleSynth() {
   const theme = useTheme();
@@ -105,31 +115,15 @@ export default function TriangleSynth() {
   const [timbre, setTimbre] = useState(TIMBRES[0]);
   const [pitch, setPitch] = useState(PITCHES[0]);
   const [emotion, setEmotion] = useState(EMOTIONS[0]);
+  const [beatCount, setBeatCount] = useState(1);
+  const [beatDelay, setBeatDelay] = useState(200); // ms
+  const [beatDialogOpen, setBeatDialogOpen] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = async (e) => {
       if (!/^[a-zA-Z]$/.test(e.key)) return;
 
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      audioCtxRef.current = audioCtx;
-      const dest = audioCtx.createMediaStreamDestination();
-      const mediaRecorder = new MediaRecorder(dest.stream);
-      mediaRecorderRef.current = mediaRecorder;
-      const chunks = [];
-      mediaRecorder.ondataavailable = (event) => chunks.push(event.data);
-      mediaRecorder.onstop = () => {
-        let blob;
-        try {
-          blob = new Blob(chunks, { type: "audio/ogg; codecs=opus" });
-        } catch (e) {
-          blob = new Blob(chunks);
-        }
-        const name = `UISound_${e.key.toUpperCase()}_${Date.now()}.ogg`;
-        setRecordings((prev) => [...prev, { name, blob }]);
-      };
-
-      // --- SOUND PARAMS BASED ON SELECTIONS ---
-      // Envelope
+      // Envelope/duration calculation
       let attack = 0.005,
         release = 0.15,
         duration = 0.15;
@@ -164,6 +158,59 @@ export default function TriangleSynth() {
         duration = 0.08;
       }
 
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      audioCtxRef.current = audioCtx;
+      const dest = audioCtx.createMediaStreamDestination();
+      const mediaRecorder = new MediaRecorder(dest.stream);
+      mediaRecorderRef.current = mediaRecorder;
+      const chunks = [];
+      mediaRecorder.ondataavailable = (event) => chunks.push(event.data);
+      mediaRecorder.onstop = () => {
+        let blob;
+        try {
+          blob = new Blob(chunks, { type: "audio/ogg; codecs=opus" });
+        } catch (e) {
+          blob = new Blob(chunks);
+        }
+        const name = `UISound_${e.key.toUpperCase()}_${Date.now()}.ogg`;
+        setRecordings((prev) => [...prev, { name, blob }]);
+      };
+
+      // Calculate interaction duration multiplier for total duration
+      let interactionDurationMultiplier = 1;
+      if (interactionType === "click" || interactionType === "tap") {
+        interactionDurationMultiplier = 0.8;
+      } else if (interactionType === "error") {
+        interactionDurationMultiplier = 1.5;
+      } else if (interactionType === "loading") {
+        interactionDurationMultiplier = 1.2;
+      } else if (interactionType === "typing") {
+        interactionDurationMultiplier = 0.6;
+      }
+
+      // Calculate total duration for multiple beats
+      const beatInterval = beatDelay / 1000; // convert ms to seconds
+      const finalDuration = duration * interactionDurationMultiplier;
+      const totalDuration = (beatCount - 1) * beatInterval + finalDuration;
+      
+      // Start recording
+      mediaRecorder.start();
+      
+      // Generate multiple beats
+      for (let i = 0; i < beatCount; i++) {
+        const beatStartTime = audioCtx.currentTime + (i * beatInterval);
+        generateBeat(audioCtx, dest, beatStartTime, attack, release, finalDuration);
+      }
+      
+      // Stop recording after all beats are complete
+      setTimeout(() => {
+        mediaRecorder.stop();
+      }, totalDuration * 1000 + 100);
+    };
+    
+    // Function to generate a single beat
+    const generateBeat = (audioCtx, dest, startTime, attack, release, baseDuration) => {
+      // --- SOUND PARAMS BASED ON SELECTIONS ---
       // Pitch/frequency
       let baseFreq = 800;
       if (pitch === "high") baseFreq = 1200 + Math.random() * 400;
@@ -172,6 +219,78 @@ export default function TriangleSynth() {
       else if (pitch === "rising") baseFreq = 400 + Math.random() * 200;
       else if (pitch === "falling") baseFreq = 1000 - Math.random() * 400;
 
+      // Interaction Type modifications
+      let interactionGainMultiplier = 1;
+      let interactionDurationMultiplier = 1;
+      if (interactionType === "click" || interactionType === "tap") {
+        interactionGainMultiplier = 1.1; // Slightly louder for clicks
+        interactionDurationMultiplier = 0.8; // Shorter duration
+      } else if (interactionType === "hover") {
+        interactionGainMultiplier = 0.7; // Quieter for hover
+        baseFreq *= 1.1; // Higher pitch
+      } else if (interactionType === "error") {
+        baseFreq *= 0.7; // Lower pitch for errors
+        interactionGainMultiplier = 1.3; // Louder
+        interactionDurationMultiplier = 1.5; // Longer duration
+      } else if (interactionType === "confirm") {
+        baseFreq *= 1.2; // Higher pitch for confirmation
+        interactionGainMultiplier = 1.2; // Louder
+      } else if (interactionType === "cancel") {
+        baseFreq *= 0.9; // Lower pitch
+        interactionGainMultiplier = 0.9; // Quieter
+      } else if (interactionType === "notification") {
+        baseFreq *= 1.15; // Higher pitch
+        interactionGainMultiplier = 1.1; // Louder
+      } else if (interactionType === "loading") {
+        interactionGainMultiplier = 0.8; // Quieter
+        interactionDurationMultiplier = 1.2; // Longer
+      } else if (interactionType === "typing") {
+        interactionGainMultiplier = 0.6; // Much quieter
+        interactionDurationMultiplier = 0.6; // Much shorter
+      }
+
+      // Emotion-based modifications
+      let emotionGainMultiplier = 1;
+      let emotionFreqMultiplier = 1;
+      if (emotion === "positive") {
+        baseFreq *= 1.1; // Slightly higher pitch
+        emotionGainMultiplier = 1.1; // Slightly louder
+      } else if (emotion === "negative") {
+        baseFreq *= 0.9; // Slightly lower pitch
+        emotionGainMultiplier = 0.8; // Quieter
+      } else if (emotion === "attention" || emotion === "urgent") {
+        baseFreq *= 1.2; // Higher pitch for attention
+        emotionGainMultiplier = 1.2; // Louder
+      } else if (emotion === "subtle") {
+        baseFreq *= 0.95; // Slightly lower
+        emotionGainMultiplier = 0.6; // Much quieter
+      } else if (emotion === "informative") {
+        baseFreq *= 1.05; // Slightly higher
+        emotionGainMultiplier = 0.9; // Slightly quieter
+      }
+
+      // Tonal Quality modifications
+      let tonalFreqMultiplier = 1;
+      let tonalGainMultiplier = 1;
+      if (tonalQuality === "atonal") {
+        // Add slight detuning for atonal effect
+        baseFreq *= (0.95 + Math.random() * 0.1); // Random detuning
+      } else if (tonalQuality === "pitched") {
+        // Clean, precise pitch
+        tonalFreqMultiplier = 1.0; // No modification
+      } else if (tonalQuality === "harmonic") {
+        // Add harmonic richness
+        tonalGainMultiplier = 1.1;
+      } else if (tonalQuality === "dissonant") {
+        // Add dissonance with slight detuning
+        baseFreq *= (0.92 + Math.random() * 0.16); // More random detuning
+        tonalGainMultiplier = 0.9;
+      }
+
+      // Combine all multipliers
+      const finalGainMultiplier = emotionGainMultiplier * interactionGainMultiplier * tonalGainMultiplier;
+      const finalDuration = baseDuration;
+
       // Timbre/texture
       let oscType = "sine";
       if (timbre === "crisp" || timbre === "clicky") oscType = "triangle";
@@ -179,6 +298,10 @@ export default function TriangleSynth() {
         oscType = "square";
       if (timbre === "warm" || timbre === "wooden" || timbre === "organic")
         oscType = "sine";
+      if (timbre === "cold") {
+        oscType = "triangle";
+        baseFreq *= 1.1; // Slightly higher pitch for cold
+      }
       if (timbre === "glassy") oscType = "triangle";
       if (timbre === "whoosh") oscType = "sine";
       if (tonalQuality === "noise" || timbre === "noise" || timbre === "whoosh")
@@ -186,11 +309,11 @@ export default function TriangleSynth() {
 
       // Envelope shape
       const gain = audioCtx.createGain();
-      gain.gain.setValueAtTime(0, audioCtx.currentTime);
-      gain.gain.linearRampToValueAtTime(0.7, audioCtx.currentTime + attack);
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.7 * finalGainMultiplier, startTime + attack);
       gain.gain.exponentialRampToValueAtTime(
         0.001,
-        audioCtx.currentTime + duration + release
+        startTime + finalDuration + release
       );
 
       // Filter
@@ -202,7 +325,7 @@ export default function TriangleSynth() {
           : timbre === "soft" || timbre === "warm"
           ? 1200
           : 2000,
-        audioCtx.currentTime
+        startTime
       );
       masterFilter.Q.value = 1.2;
       gain.connect(masterFilter);
@@ -212,7 +335,7 @@ export default function TriangleSynth() {
       // Sound generation
       if (oscType === "noise") {
         // Noise burst
-        const bufferSize = audioCtx.sampleRate * duration;
+        const bufferSize = audioCtx.sampleRate * finalDuration;
         const buffer = audioCtx.createBuffer(
           1,
           bufferSize,
@@ -227,47 +350,31 @@ export default function TriangleSynth() {
         noise.buffer = buffer;
         const noiseFilter = audioCtx.createBiquadFilter();
         noiseFilter.type = timbre === "whoosh" ? "highpass" : "bandpass";
-        noiseFilter.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
+        noiseFilter.frequency.setValueAtTime(baseFreq, startTime);
         noise.connect(noiseFilter);
         noiseFilter.connect(gain);
-        mediaRecorder.start();
-        noise.start();
-        noise.stop(audioCtx.currentTime + duration);
-        noise.onended = () => {
-          mediaRecorder.stop();
-          setSoundLog((prev) => [
-            ...prev,
-            `Key '${e.key.toUpperCase()}' -> ${interactionType} | ${tonalQuality} | ${envelope} | ${timbre} | ${pitch} | ${emotion}`,
-          ]);
-        };
+        noise.start(startTime);
+        noise.stop(startTime + finalDuration);
       } else {
         // Oscillator
         const osc = audioCtx.createOscillator();
         osc.type = oscType;
-        osc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(baseFreq, startTime);
         // Pitch bend for rising/falling
         if (pitch === "rising") {
           osc.frequency.linearRampToValueAtTime(
             baseFreq * 1.7,
-            audioCtx.currentTime + duration
+            startTime + finalDuration
           );
         } else if (pitch === "falling") {
           osc.frequency.linearRampToValueAtTime(
             baseFreq * 0.5,
-            audioCtx.currentTime + duration
+            startTime + finalDuration
           );
         }
         osc.connect(gain);
-        mediaRecorder.start();
-        osc.start();
-        osc.stop(audioCtx.currentTime + duration);
-        osc.onended = () => {
-          mediaRecorder.stop();
-          setSoundLog((prev) => [
-            ...prev,
-            `Key '${e.key.toUpperCase()}' -> ${interactionType} | ${tonalQuality} | ${envelope} | ${timbre} | ${pitch} | ${emotion}`,
-          ]);
-        };
+        osc.start(startTime);
+        osc.stop(startTime + finalDuration);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -279,6 +386,8 @@ export default function TriangleSynth() {
     timbre,
     pitch,
     emotion,
+    beatCount,
+    beatDelay,
   ]);
 
   const handlePlay = (blob) => {
@@ -423,7 +532,7 @@ export default function TriangleSynth() {
             </FormControl>
 
             <FormControl fullWidth size="small">
-              <InputLabel>Pitch / Frequency Range</InputLabel>
+              <InputLabel>Pitch</InputLabel>
               <Select
                 value={pitch}
                 onChange={(e) => setPitch(e.target.value)}
@@ -438,7 +547,7 @@ export default function TriangleSynth() {
             </FormControl>
 
             <FormControl fullWidth size="small">
-              <InputLabel>Emotion / Feedback Intent</InputLabel>
+              <InputLabel>Emotion</InputLabel>
               <Select
                 value={emotion}
                 onChange={(e) => setEmotion(e.target.value)}
@@ -451,8 +560,72 @@ export default function TriangleSynth() {
                 ))}
               </Select>
             </FormControl>
-          </Box>
+
+            <FormControl fullWidth size="small" sx={{ gridColumn: { lg: 'span 2' } }}>
+              <Button
+                variant="outlined"
+                onClick={() => setBeatDialogOpen(true)}
+                sx={{
+                  justifyContent: 'flex-start',
+                  textTransform: 'none',
+                  height: '40px',
+                  borderColor: 'rgba(0, 0, 0, 0.23)',
+                  color: 'rgba(0, 0, 0, 0.87)',
+                  fontSize: '0.875rem',
+                  px: 2,
+                  py: 1,
+                  '&:hover': {
+                    borderColor: 'rgba(0, 0, 0, 0.87)',
+                  },
+                }}
+                fullWidth
+              >
+                {beatCount} beat{beatCount > 1 ? 's' : ''} • {beatDelay}ms
+              </Button>
+            </FormControl>
+                      </Box>
         </Paper>
+
+        {/* Beat Settings Dialog */}
+        <Dialog open={beatDialogOpen} onClose={() => setBeatDialogOpen(false)} maxWidth={false}>
+          <Box sx={{ width: 300 }}>
+            <DialogTitle>Beats Settings</DialogTitle>
+            <DialogContent sx={{ px: 2, pb: 2, p: 2 }}>
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="subtitle1" sx={{ mb: 1 }}>Beats Count</Typography>
+              <TextField
+                type="number"
+                value={beatCount}
+                onChange={e => setBeatCount(Math.max(1, Number(e.target.value)))}
+                inputProps={{ min: 1 }}
+                size="small"
+                fullWidth
+                label="Number of beats"
+              />
+            </Box>
+            <Box>
+              <Typography variant="subtitle1" sx={{ mb: 1 }}>Delay</Typography>
+              <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+                <Box sx={{ width: 'calc(100% - 30px)', px: 2 }}>
+                  <Slider
+                    value={beatDelay}
+                    min={100}
+                    max={1000}
+                    step={10}
+                    onChange={(_, v) => setBeatDelay(v)}
+                    valueLabelDisplay="auto"
+                    marks={[{ value: 100, label: '100ms' }, { value: 1000, label: '1000ms' }]}
+                  />
+                </Box>
+              </Box>
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setBeatDialogOpen(false)} color="secondary">Cancel</Button>
+            <Button onClick={() => setBeatDialogOpen(false)} color="primary" variant="contained">Save</Button>
+          </DialogActions>
+            </Box>
+        </Dialog>
 
         {/* Sounds Section */}
         <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 3 }}>
