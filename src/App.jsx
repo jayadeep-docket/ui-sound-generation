@@ -1,115 +1,34 @@
-// TriangleSynth.tsx
 import { useEffect, useRef, useState } from "react";
 import saveAs from "file-saver";
 import JSZip from "jszip";
-import {
-  Box,
-  Container,
-  Typography,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
-  Button,
-  Card,
-  CardContent,
-  List,
-  ListItem,
-  ListItemText,
-  IconButton,
-  Chip,
-  Paper,
-  Divider,
-  useTheme,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Slider,
-  IconButton as MuiIconButton,
-  TextField,
-} from '@mui/material';
-import {
-  PlayArrow,
-  Download,
-  Save,
-  Clear,
-  Star,
-  Headphones,
-  Delete,
-} from '@mui/icons-material';
-import AddIcon from '@mui/icons-material/Add';
-import RemoveIcon from '@mui/icons-material/Remove';
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Slider } from "@/components/ui/slider";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Play, Download, Save, Trash2, Star, Headphones, Settings } from "lucide-react";
 
 const INTERACTION_TYPES = [
-  "click",
-  "tap",
-  "hover",
-  "select",
-  "confirm",
-  "cancel",
-  "error",
-  "popup",
-  "notification",
-  "transition",
-  "back",
-  "scroll",
-  "drag-drop",
-  "typing",
-  "loading",
+  "click", "tap", "hover", "select", "confirm", "cancel", "error", "popup", 
+  "notification", "transition", "back", "scroll", "drag-drop", "typing", "loading",
 ];
-const TONAL_QUALITIES = [
-  "tonal",
-  "atonal",
-  "pitched",
-  "noise",
-  "harmonic",
-  "dissonant",
-];
-const ENVELOPES = [
-  "short / snappy",
-  "medium",
-  "long",
-  "sustain",
-  "fade",
-  "stutter",
-  "pulse",
-];
-const TIMBRES = [
-  "soft",
-  "hard",
-  "crisp",
-  "warm",
-  "cold",
-  "metallic",
-  "wooden",
-  "digital",
-  "organic",
-  "glassy",
-  "clicky",
-  "whoosh",
-];
+const TONAL_QUALITIES = ["tonal", "atonal", "pitched", "noise", "harmonic", "dissonant"];
+const ENVELOPES = ["short / snappy", "medium", "long", "sustain", "fade", "stutter", "pulse"];
+const TIMBRES = ["soft", "hard", "crisp", "warm", "cold", "metallic", "wooden", "digital", "organic", "glassy", "clicky", "whoosh"];
 const PITCHES = ["high", "mid", "low", "rising", "falling"];
-const EMOTIONS = [
-  "",
-  "positive",
-  "negative",
-  "neutral",
-  "attention",
-  "subtle",
-  "urgent",
-  "informative",
-];
-const BEAT_COUNTS = [1, 2, 3]; // (no longer used as dropdown)
+const EMOTIONS = ["none", "positive", "negative", "neutral", "attention", "subtle", "urgent", "informative"];
 
 export default function TriangleSynth() {
-  const theme = useTheme();
   const audioCtxRef = useRef(null);
   const mediaRecorderRef = useRef(null);
-  const [soundLog, setSoundLog] = useState([]);
   const [recordings, setRecordings] = useState([]);
+  const [isSaving, setIsSaving] = useState(false);
 
-  // Helper functions for blob/base64 conversion (moved before useState)
+  // Helper functions for blob/base64 conversion
   const blobToBase64 = (blob) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -130,47 +49,37 @@ export default function TriangleSynth() {
   };
 
   const [savedSounds, setSavedSounds] = useState(() => {
-    console.log('Initializing saved sounds from localStorage...');
     const saved = localStorage.getItem('savedSounds');
     if (saved) {
       try {
-        console.log('Found saved sounds in localStorage, parsing...');
         const parsedSounds = JSON.parse(saved);
-        console.log('Parsed sounds count:', parsedSounds.length);
-        // Convert base64 back to blobs
-        const convertedSounds = parsedSounds.map(sound => ({
+        return parsedSounds.map(sound => ({
           name: sound.name,
           blob: base64ToBlob(sound.blobData, 'audio/ogg'),
           blobData: sound.blobData,
-          config: sound.config, // Include configuration data
+          config: sound.config,
           timestamp: sound.timestamp
         }));
-        console.log('Successfully loaded saved sounds:', convertedSounds.length);
-        return convertedSounds;
       } catch (e) {
         console.error('Error loading saved sounds:', e);
         return [];
       }
     }
-    console.log('No saved sounds found in localStorage');
     return [];
   });
 
   // Save sounds to localStorage
   const saveSoundsToStorage = async (sounds) => {
     try {
-      console.log('Converting sounds for storage, count:', sounds.length);
       const soundsForStorage = await Promise.all(
         sounds.map(async (sound) => ({
           name: sound.name,
           blobData: sound.blobData || await blobToBase64(sound.blob),
-          config: sound.config, // Include configuration data
+          config: sound.config,
           timestamp: sound.timestamp || Date.now()
         }))
       );
-      console.log('Sounds converted for storage, saving to localStorage...');
       localStorage.setItem('savedSounds', JSON.stringify(soundsForStorage));
-      console.log('Successfully saved to localStorage');
     } catch (error) {
       console.error('Error saving to localStorage:', error);
     }
@@ -184,464 +93,426 @@ export default function TriangleSynth() {
   const [pitch, setPitch] = useState(PITCHES[0]);
   const [emotion, setEmotion] = useState(EMOTIONS[0]);
   const [beatCount, setBeatCount] = useState(1);
-  const [beatDelay, setBeatDelay] = useState(200); // ms
+  const [beatDelay, setBeatDelay] = useState(200);
   const [beatDialogOpen, setBeatDialogOpen] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
 
+  // Function to generate and record actual audio
+  const generateAudioBlob = async (config) => {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const sampleRate = audioCtx.sampleRate;
+    
+    // === DURATION CALCULATION ===
+    let singleBeatDuration = 0.15; // Default short duration
+    
+    // Envelope affects base duration
+    if (config.settings.envelope.includes("medium")) {
+      singleBeatDuration = 0.3;
+    } else if (config.settings.envelope.includes("long")) {
+      singleBeatDuration = 0.6;
+    } else if (config.settings.envelope.includes("sustain")) {
+      singleBeatDuration = 1.2;
+    } else if (config.settings.envelope.includes("short") || config.settings.envelope.includes("snappy")) {
+      singleBeatDuration = 0.08;
+    }
+    
+    // Interaction type affects duration
+    if (config.settings.interactionType === "loading") {
+      singleBeatDuration *= 1.5; // Longer for loading sounds
+    } else if (config.settings.interactionType === "error") {
+      singleBeatDuration *= 1.3; // Longer for emphasis
+    } else if (config.settings.interactionType === "hover") {
+      singleBeatDuration *= 0.7; // Shorter for quick feedback
+    } else if (config.settings.interactionType === "click" || config.settings.interactionType === "tap") {
+      singleBeatDuration *= 0.6; // Very short for immediate feedback
+    }
+    
+    // Beat settings
+    const beatCount = config.settings.beatCount || 1;
+    const beatDelay = (config.settings.beatDelay || 200) / 1000; // Convert ms to seconds
+    const totalDuration = (singleBeatDuration * beatCount) + (beatDelay * (beatCount - 1));
+    
+    // Debug logging for beat timing
+    if (beatCount > 1) {
+      console.log('Beat Debug:', {
+        beatCount,
+        beatDelayMs: config.settings.beatDelay,
+        beatDelaySeconds: beatDelay,
+        singleBeatDuration,
+        totalDuration,
+        expectedTiming: `${beatCount} beats, ${config.settings.beatDelay}ms delays`
+      });
+    }
+    
+    const length = sampleRate * totalDuration;
+    const buffer = audioCtx.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    
+    // === FREQUENCY CALCULATION ===
+    let baseFreq = 300 + (config.progressionFactor * 700); // Base progression
+    
+    // Pitch range modifications
+    if (config.settings.pitch === "high") {
+      baseFreq = 800 + (config.progressionFactor * 1200); // 800-2000Hz
+    } else if (config.settings.pitch === "mid") {
+      baseFreq = 400 + (config.progressionFactor * 800); // 400-1200Hz
+    } else if (config.settings.pitch === "low") {
+      baseFreq = 150 + (config.progressionFactor * 350); // 150-500Hz
+    } else if (config.settings.pitch === "rising") {
+      // Frequency will rise during the sound
+      baseFreq = 200 + (config.progressionFactor * 400); // Start lower
+    } else if (config.settings.pitch === "falling") {
+      // Frequency will fall during the sound
+      baseFreq = 600 + (config.progressionFactor * 600); // Start higher
+    }
+    
+    // Interaction type frequency modifications
+    const interactionFreqMods = {
+      "error": 0.65,        // Lower, more serious
+      "confirm": 1.25,      // Higher, more positive
+      "cancel": 0.75,       // Lower, less positive
+      "hover": 1.1,         // Slightly higher
+      "select": 1.15,       // Clear selection sound
+      "notification": 1.2,  // Attention-grabbing
+      "popup": 1.05,        // Gentle popup
+      "transition": 0.9,    // Smooth transition
+      "back": 0.85,         // Going back/down
+      "scroll": 0.95,       // Neutral scroll
+      "drag-drop": 1.0,     // Neutral
+      "typing": 1.1,        // Crisp typing sound
+      "loading": 0.8,       // Lower, less intrusive
+      "click": 1.2,         // Sharp click
+      "tap": 1.15           // Quick tap
+    };
+    
+    if (interactionFreqMods[config.settings.interactionType]) {
+      baseFreq *= interactionFreqMods[config.settings.interactionType];
+    }
+    
+    // Emotion frequency modifications
+    const emotionFreqMods = {
+      "positive": 1.15,     // Brighter, higher
+      "negative": 0.85,     // Darker, lower
+      "urgent": 1.4,        // Much higher, demanding attention
+      "attention": 1.25,    // Higher, but not as urgent
+      "subtle": 0.9,        // Slightly lower, less noticeable
+      "neutral": 1.0,       // No change
+      "informative": 1.05   // Slightly higher, clear
+    };
+    
+    if (emotionFreqMods[config.settings.emotion]) {
+      baseFreq *= emotionFreqMods[config.settings.emotion];
+    }
+    
+    // === AUDIO GENERATION ===
+    for (let i = 0; i < length; i++) {
+      const t = i / sampleRate;
+      let sample = 0;
+      let envelope = 0;
+      
+      // Determine which beat we're in
+      for (let beat = 0; beat < beatCount; beat++) {
+        const beatStartTime = beat * (singleBeatDuration + beatDelay);
+        const beatEndTime = beatStartTime + singleBeatDuration;
+        
+        // Debug logging for first few samples of each beat
+        if (beatCount > 1 && i < sampleRate * 0.01 && Math.abs(t - beatStartTime) < 0.001) {
+          console.log(`Beat ${beat + 1} starts at ${beatStartTime.toFixed(3)}s, ends at ${beatEndTime.toFixed(3)}s`);
+        }
+        
+        if (t >= beatStartTime && t < beatEndTime) {
+          const localT = t - beatStartTime;
+          const normalizedT = localT / singleBeatDuration; // 0 to 1
+          
+          // Dynamic frequency for pitch effects
+          let dynamicFreq = baseFreq;
+          if (config.settings.pitch === "rising") {
+            dynamicFreq = baseFreq * (1 + normalizedT * 0.8); // Rise by 80%
+          } else if (config.settings.pitch === "falling") {
+            dynamicFreq = baseFreq * (1 - normalizedT * 0.6); // Fall by 60%
+          }
+          
+          // === TONAL QUALITY EFFECTS ===
+          let harmonicContent = [];
+          let noiseAmount = 0;
+          
+          if (config.settings.tonalQuality === "tonal") {
+            harmonicContent = [1.0]; // Pure fundamental
+          } else if (config.settings.tonalQuality === "harmonic") {
+            harmonicContent = [1.0, 0.5, 0.25, 0.125]; // Rich harmonics
+          } else if (config.settings.tonalQuality === "dissonant") {
+            harmonicContent = [1.0, 0.6, 0.4]; // Clashing intervals
+            dynamicFreq *= 1.0; // Add slight detuning
+          } else if (config.settings.tonalQuality === "atonal") {
+            harmonicContent = [1.0, 0.3, 0.2, 0.1]; // Weak harmonics
+            noiseAmount = 0.1;
+          } else if (config.settings.tonalQuality === "noise") {
+            harmonicContent = [0.7]; // Reduced fundamental
+            noiseAmount = 0.4;
+          } else if (config.settings.tonalQuality === "pitched") {
+            harmonicContent = [1.0, 0.3]; // Clear pitch with some harmonics
+          }
+          
+          // === TIMBRE WAVEFORM GENERATION ===
+          if (config.settings.timbre === "soft") {
+            // Pure sine wave
+            sample = Math.sin(2 * Math.PI * dynamicFreq * localT);
+          } else if (config.settings.timbre === "hard") {
+            // Square wave with harmonics
+            sample = Math.sign(Math.sin(2 * Math.PI * dynamicFreq * localT));
+          } else if (config.settings.timbre === "crisp") {
+            // Triangle wave
+            sample = (2 / Math.PI) * Math.asin(Math.sin(2 * Math.PI * dynamicFreq * localT));
+          } else if (config.settings.timbre === "warm") {
+            // Sine with even harmonics
+            sample = Math.sin(2 * Math.PI * dynamicFreq * localT) + 
+                    0.3 * Math.sin(2 * Math.PI * dynamicFreq * 2 * localT) +
+                    0.1 * Math.sin(2 * Math.PI * dynamicFreq * 4 * localT);
+          } else if (config.settings.timbre === "cold") {
+            // Pure sine, filtered
+            sample = Math.sin(2 * Math.PI * dynamicFreq * localT) * 0.8;
+          } else if (config.settings.timbre === "metallic") {
+            // Square with high harmonics
+            sample = Math.sign(Math.sin(2 * Math.PI * dynamicFreq * localT)) +
+                    0.3 * Math.sign(Math.sin(2 * Math.PI * dynamicFreq * 3 * localT));
+          } else if (config.settings.timbre === "wooden") {
+            // Sawtooth-like
+            sample = (2 / Math.PI) * Math.atan(Math.tan(Math.PI * dynamicFreq * localT));
+          } else if (config.settings.timbre === "digital") {
+            // Bit-crushed square
+            const crushed = Math.sign(Math.sin(2 * Math.PI * dynamicFreq * localT));
+            sample = Math.round(crushed * 4) / 4; // 4-bit quantization
+          } else if (config.settings.timbre === "organic") {
+            // Sine with slight variations
+            sample = Math.sin(2 * Math.PI * dynamicFreq * localT) * 
+                    (1 + 0.1 * Math.sin(2 * Math.PI * dynamicFreq * 0.1 * localT));
+          } else if (config.settings.timbre === "glassy") {
+            // High harmonics, bell-like
+            sample = Math.sin(2 * Math.PI * dynamicFreq * localT) +
+                    0.4 * Math.sin(2 * Math.PI * dynamicFreq * 3 * localT) +
+                    0.2 * Math.sin(2 * Math.PI * dynamicFreq * 5 * localT);
+          } else if (config.settings.timbre === "clicky") {
+            // Sharp attack, quick decay
+            sample = Math.sin(2 * Math.PI * dynamicFreq * localT) * 
+                    Math.exp(-localT * 10);
+          } else if (config.settings.timbre === "whoosh") {
+            // Filtered noise sweep
+            sample = Math.sin(2 * Math.PI * dynamicFreq * localT) * 
+                    (1 + 0.5 * Math.sin(2 * Math.PI * dynamicFreq * 0.05 * localT));
+          } else {
+            // Default sine
+            sample = Math.sin(2 * Math.PI * dynamicFreq * localT);
+          }
+          
+          // Apply tonal quality modifications
+          if (harmonicContent.length > 1) {
+            let harmonicSum = 0;
+            for (let h = 0; h < harmonicContent.length; h++) {
+              if (config.settings.tonalQuality === "dissonant" && h > 0) {
+                // Add slight detuning for dissonance
+                harmonicSum += harmonicContent[h] * Math.sin(2 * Math.PI * dynamicFreq * (h + 1) * 1.05 * localT);
+              } else {
+                harmonicSum += harmonicContent[h] * Math.sin(2 * Math.PI * dynamicFreq * (h + 1) * localT);
+              }
+            }
+            sample = harmonicSum;
+          }
+          
+          // Add noise if specified
+          if (noiseAmount > 0) {
+            sample = sample * (1 - noiseAmount) + (Math.random() - 0.5) * noiseAmount;
+          }
+          
+          // === ENVELOPE SHAPING ===
+          envelope = 1;
+          const fadeInTime = 0.005; // Very quick fade in
+          let fadeOutStart = singleBeatDuration * 0.7;
+          let envelopeShape = "linear";
+          
+          if (config.settings.envelope.includes("short") || config.settings.envelope.includes("snappy")) {
+            fadeOutStart = singleBeatDuration * 0.2;
+            envelopeShape = "exponential";
+          } else if (config.settings.envelope.includes("medium")) {
+            fadeOutStart = singleBeatDuration * 0.6;
+          } else if (config.settings.envelope.includes("long")) {
+            fadeOutStart = singleBeatDuration * 0.8;
+          } else if (config.settings.envelope.includes("sustain")) {
+            fadeOutStart = singleBeatDuration * 0.95;
+          } else if (config.settings.envelope.includes("fade")) {
+            fadeOutStart = singleBeatDuration * 0.3;
+            envelopeShape = "smooth";
+          } else if (config.settings.envelope.includes("stutter")) {
+            // Stutter effect
+            const stutterRate = 12; // Hz
+            const stutterPhase = Math.floor(localT * stutterRate) % 2;
+            envelope *= stutterPhase === 0 ? 1 : 0.2;
+          } else if (config.settings.envelope.includes("pulse")) {
+            // Pulse effect
+            const pulseRate = 8; // Hz
+            envelope *= 0.3 + 0.7 * Math.abs(Math.sin(2 * Math.PI * pulseRate * localT));
+          }
+          
+          // Apply envelope curves
+          if (localT < fadeInTime) {
+            envelope *= localT / fadeInTime;
+          } else if (localT > fadeOutStart) {
+            const fadeProgress = (localT - fadeOutStart) / (singleBeatDuration - fadeOutStart);
+            if (envelopeShape === "exponential") {
+              envelope *= Math.exp(-fadeProgress * 5);
+            } else if (envelopeShape === "smooth") {
+              envelope *= Math.cos(fadeProgress * Math.PI / 2);
+            } else {
+              envelope *= 1 - fadeProgress;
+            }
+          }
+          
+          // Interaction-specific envelope modifications
+          if (config.settings.interactionType === "error") {
+            envelope *= 1.2; // Slightly louder for emphasis
+          } else if (config.settings.interactionType === "subtle" || config.settings.interactionType === "hover") {
+            envelope *= 0.7; // Quieter for subtlety
+          } else if (config.settings.interactionType === "loading") {
+            envelope *= 0.8; // Less intrusive
+          }
+          
+          break; // Found the right beat
+        }
+      }
+      
+      // Final amplitude scaling
+      let finalAmplitude = 0.25;
+      if (config.settings.emotion === "urgent") {
+        finalAmplitude = 0.35;
+      } else if (config.settings.emotion === "subtle") {
+        finalAmplitude = 0.15;
+      }
+      
+      data[i] = sample * envelope * finalAmplitude;
+    }
+    
+    // Convert to WAV blob
+    const wavBlob = audioBufferToWav(buffer);
+    return wavBlob;
+  };
+  
+  // Function to convert AudioBuffer to WAV blob
+  const audioBufferToWav = (buffer) => {
+    const length = buffer.length;
+    const sampleRate = buffer.sampleRate;
+    const arrayBuffer = new ArrayBuffer(44 + length * 2);
+    const view = new DataView(arrayBuffer);
+    
+    // WAV header
+    const writeString = (offset, string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    };
+    
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, length * 2, true);
+    
+    // Convert float samples to 16-bit PCM
+    const data = buffer.getChannelData(0);
+    let offset = 44;
+    for (let i = 0; i < length; i++) {
+      const sample = Math.max(-1, Math.min(1, data[i]));
+      view.setInt16(offset, sample * 0x7FFF, true);
+      offset += 2;
+    }
+    
+    return new Blob([arrayBuffer], { type: 'audio/wav' });
+  };
+  
+
+
+  // Keyboard event handler with sound generation
   useEffect(() => {
     const handleKeyDown = async (e) => {
-      // Define keyboard layout progression from Q to M (left to right, top to bottom)
       const keyboardProgression = [
-        'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p',  // Top row
-        'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l',       // Middle row
-        'z', 'x', 'c', 'v', 'b', 'n', 'm'                  // Bottom row
+        'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p',
+        'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l',
+        'z', 'x', 'c', 'v', 'b', 'n', 'm'
       ];
       
       const keyIndex = keyboardProgression.indexOf(e.key.toLowerCase());
-      
-      // Only respond to keys in our progression
       if (keyIndex === -1) return;
 
-      // Calculate progression factor (0 to 1) based on key position
       const progressionFactor = keyIndex / (keyboardProgression.length - 1);
 
-      // Envelope/duration calculation
-      let attack = 0.005,
-        release = 0.15,
-        duration = 0.15;
-      if (envelope.includes("medium")) {
-        attack = 0.01;
-        release = 0.3;
-        duration = 0.3;
-      }
-      if (envelope.includes("long")) {
-        attack = 0.02;
-        release = 0.6;
-        duration = 0.6;
-      }
-      if (envelope.includes("sustain")) {
-        attack = 0.01;
-        release = 1.2;
-        duration = 1.2;
-      }
-      if (envelope.includes("fade")) {
-        attack = 0.01;
-        release = 0.7;
-        duration = 0.7;
-      }
-      if (envelope.includes("stutter")) {
-        attack = 0.005;
-        release = 0.08;
-        duration = 0.08;
-      }
-      if (envelope.includes("pulse")) {
-        attack = 0.005;
-        release = 0.08;
-        duration = 0.08;
-      }
-
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      audioCtxRef.current = audioCtx;
-      const dest = audioCtx.createMediaStreamDestination();
-      const mediaRecorder = new MediaRecorder(dest.stream);
-      mediaRecorderRef.current = mediaRecorder;
-      const chunks = [];
-      mediaRecorder.ondataavailable = (event) => chunks.push(event.data);
-      mediaRecorder.onstop = () => {
-        let blob;
-        try {
-          blob = new Blob(chunks, { type: "audio/ogg; codecs=opus" });
-        } catch (e) {
-          blob = new Blob(chunks);
-        }
-        const name = `UISound_${e.key.toUpperCase()}_${Date.now()}.ogg`;
-        
-        // Create configuration object
-        const config = {
-          key: e.key.toUpperCase(),
-          keyIndex: keyIndex,
-          progressionFactor: progressionFactor,
-          settings: {
-            interactionType,
-            tonalQuality,
-            envelope,
-            timbre,
-            pitch,
-            emotion,
-            beatCount,
-            beatDelay
-          },
-          timestamp: Date.now(),
-          generatedAt: new Date().toISOString()
-        };
-        
-        setRecordings((prev) => [...prev, { name, blob, config }]);
+      // Create config for this sound
+      const config = {
+        key: e.key.toUpperCase(),
+        keyIndex: keyIndex,
+        progressionFactor: progressionFactor,
+        settings: {
+          interactionType, tonalQuality, envelope, timbre, pitch, emotion, beatCount, beatDelay
+        },
+        timestamp: Date.now(),
+        generatedAt: new Date().toISOString()
       };
-
-      // Calculate interaction duration multiplier for total duration
-      let interactionDurationMultiplier = 1;
-      if (interactionType === "click" || interactionType === "tap") {
-        interactionDurationMultiplier = 0.8;
-      } else if (interactionType === "error") {
-        interactionDurationMultiplier = 1.5;
-      } else if (interactionType === "loading") {
-        interactionDurationMultiplier = 1.2;
-      } else if (interactionType === "typing") {
-        interactionDurationMultiplier = 0.6;
-      }
-
-      // Calculate total duration for multiple beats
-      const beatInterval = beatDelay / 1000; // convert ms to seconds
-      const finalDuration = duration * interactionDurationMultiplier;
-      const totalDuration = (beatCount - 1) * beatInterval + finalDuration;
       
-      // Start recording
-      mediaRecorder.start();
+      // Generate audio blob for saving/downloading
+      const blob = await generateAudioBlob(config);
+      const name = `UISound_${e.key.toUpperCase()}_${Date.now()}.wav`;
       
-      // Generate multiple beats
-      for (let i = 0; i < beatCount; i++) {
-        const beatStartTime = audioCtx.currentTime + (i * beatInterval);
-        generateBeat(audioCtx, dest, beatStartTime, attack, release, finalDuration, progressionFactor);
-      }
+      // Play the same audio that was generated
+      await handlePlay(blob, config);
       
-      // Stop recording after all beats are complete
-      setTimeout(() => {
-        mediaRecorder.stop();
-      }, totalDuration * 1000 + 100);
+      setRecordings(prev => [...prev, { name, blob, config }]);
     };
-    
-    // Function to generate a single beat
-    const generateBeat = (audioCtx, dest, startTime, attack, release, baseDuration, progressionFactor) => {
-      // --- SOUND PARAMS BASED ON SELECTIONS AND PROGRESSION ---
-      // Base frequency progression: Start low and go higher
-      let baseFreq;
-      if (pitch === "high") {
-        baseFreq = 800 + (progressionFactor * 800); // 800Hz to 1600Hz
-      } else if (pitch === "mid") {
-        baseFreq = 400 + (progressionFactor * 600); // 400Hz to 1000Hz
-      } else if (pitch === "low") {
-        baseFreq = 200 + (progressionFactor * 400); // 200Hz to 600Hz
-      } else if (pitch === "rising") {
-        baseFreq = 300 + (progressionFactor * 500); // 300Hz to 800Hz, will rise further
-      } else if (pitch === "falling") {
-        baseFreq = 1000 - (progressionFactor * 400); // 1000Hz to 600Hz, will fall further
-      } else {
-        // Default progressive scale
-        baseFreq = 300 + (progressionFactor * 700); // 300Hz to 1000Hz
-      }
 
-      // Interaction Type modifications
-      let interactionGainMultiplier = 1;
-      let interactionDurationMultiplier = 1;
-      if (interactionType === "click" || interactionType === "tap") {
-        interactionGainMultiplier = 1.1; // Slightly louder for clicks
-        interactionDurationMultiplier = 0.8; // Shorter duration
-      } else if (interactionType === "hover") {
-        interactionGainMultiplier = 0.7; // Quieter for hover
-        baseFreq *= 1.1; // Higher pitch
-      } else if (interactionType === "error") {
-        baseFreq *= 0.7; // Lower pitch for errors
-        interactionGainMultiplier = 1.3; // Louder
-        interactionDurationMultiplier = 1.5; // Longer duration
-      } else if (interactionType === "confirm") {
-        baseFreq *= 1.2; // Higher pitch for confirmation
-        interactionGainMultiplier = 1.2; // Louder
-      } else if (interactionType === "cancel") {
-        baseFreq *= 0.9; // Lower pitch
-        interactionGainMultiplier = 0.9; // Quieter
-      } else if (interactionType === "notification") {
-        baseFreq *= 1.15; // Higher pitch
-        interactionGainMultiplier = 1.1; // Louder
-      } else if (interactionType === "loading") {
-        interactionGainMultiplier = 0.8; // Quieter
-        interactionDurationMultiplier = 1.2; // Longer
-      } else if (interactionType === "typing") {
-        interactionGainMultiplier = 0.6; // Much quieter
-        interactionDurationMultiplier = 0.6; // Much shorter
-      }
-
-      // Emotion-based modifications
-      let emotionGainMultiplier = 1;
-      let emotionFreqMultiplier = 1;
-      if (emotion === "positive") {
-        baseFreq *= 1.1; // Slightly higher pitch
-        emotionGainMultiplier = 1.1; // Slightly louder
-      } else if (emotion === "negative") {
-        baseFreq *= 0.9; // Slightly lower pitch
-        emotionGainMultiplier = 0.8; // Quieter
-      } else if (emotion === "attention" || emotion === "urgent") {
-        baseFreq *= 1.2; // Higher pitch for attention
-        emotionGainMultiplier = 1.2; // Louder
-      } else if (emotion === "subtle") {
-        baseFreq *= 0.95; // Slightly lower
-        emotionGainMultiplier = 0.6; // Much quieter
-      } else if (emotion === "informative") {
-        baseFreq *= 1.05; // Slightly higher
-        emotionGainMultiplier = 0.9; // Slightly quieter
-      }
-
-      // Tonal Quality modifications
-      let tonalFreqMultiplier = 1;
-      let tonalGainMultiplier = 1;
-      if (tonalQuality === "atonal") {
-        // Add slight detuning for atonal effect, but keep progression
-        baseFreq *= (0.98 + (progressionFactor * 0.04)); // Slight progressive detuning
-      } else if (tonalQuality === "pitched") {
-        // Clean, precise pitch - no modification needed
-        tonalFreqMultiplier = 1.0;
-      } else if (tonalQuality === "harmonic") {
-        // Add harmonic richness
-        tonalGainMultiplier = 1.1;
-      } else if (tonalQuality === "dissonant") {
-        // Add progressive dissonance
-        baseFreq *= (0.95 + (progressionFactor * 0.1)); // Progressive detuning
-        tonalGainMultiplier = 0.9;
-      }
-
-      // Combine all multipliers
-      const finalGainMultiplier = emotionGainMultiplier * interactionGainMultiplier * tonalGainMultiplier;
-      const finalDuration = baseDuration;
-
-      // Timbre/texture
-      let oscType = "sine";
-      if (timbre === "crisp" || timbre === "clicky") oscType = "triangle";
-      if (timbre === "hard" || timbre === "metallic" || timbre === "digital")
-        oscType = "square";
-      if (timbre === "warm" || timbre === "wooden" || timbre === "organic")
-        oscType = "sine";
-      if (timbre === "cold") {
-        oscType = "triangle";
-        baseFreq *= 1.1; // Slightly higher pitch for cold
-      }
-      if (timbre === "glassy") oscType = "triangle";
-      if (timbre === "whoosh") oscType = "sine";
-      if (tonalQuality === "noise" || timbre === "noise" || timbre === "whoosh")
-        oscType = "noise";
-
-      // Envelope shape
-      const gain = audioCtx.createGain();
-      gain.gain.setValueAtTime(0, startTime);
-      gain.gain.linearRampToValueAtTime(0.7 * finalGainMultiplier, startTime + attack);
-      gain.gain.exponentialRampToValueAtTime(
-        0.001,
-        startTime + finalDuration + release
-      );
-
-      // Filter
-      const masterFilter = audioCtx.createBiquadFilter();
-      masterFilter.type = "lowpass";
-      masterFilter.frequency.setValueAtTime(
-        timbre === "crisp" || timbre === "hard"
-          ? 4000
-          : timbre === "soft" || timbre === "warm"
-          ? 1200
-          : 2000,
-        startTime
-      );
-      masterFilter.Q.value = 1.2;
-      gain.connect(masterFilter);
-      masterFilter.connect(dest);
-      masterFilter.connect(audioCtx.destination);
-
-      // Sound generation
-      if (oscType === "noise") {
-        // Noise burst with progressive filtering
-        const bufferSize = audioCtx.sampleRate * finalDuration;
-        const buffer = audioCtx.createBuffer(
-          1,
-          bufferSize,
-          audioCtx.sampleRate
-        );
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          data[i] =
-            (Math.random() * 2 - 1) * (timbre === "crisp" ? 0.25 : 0.15);
-        }
-        const noise = audioCtx.createBufferSource();
-        noise.buffer = buffer;
-        const noiseFilter = audioCtx.createBiquadFilter();
-        noiseFilter.type = timbre === "whoosh" ? "highpass" : "bandpass";
-        noiseFilter.frequency.setValueAtTime(baseFreq, startTime);
-        noise.connect(noiseFilter);
-        noiseFilter.connect(gain);
-        noise.start(startTime);
-        noise.stop(startTime + finalDuration);
-      } else {
-        // Oscillator
-        const osc = audioCtx.createOscillator();
-        osc.type = oscType;
-        osc.frequency.setValueAtTime(baseFreq, startTime);
-        // Pitch bend for rising/falling
-        if (pitch === "rising") {
-          osc.frequency.linearRampToValueAtTime(
-            baseFreq * 1.7,
-            startTime + finalDuration
-          );
-        } else if (pitch === "falling") {
-          osc.frequency.linearRampToValueAtTime(
-            baseFreq * 0.5,
-            startTime + finalDuration
-          );
-        }
-        osc.connect(gain);
-        osc.start(startTime);
-        osc.stop(startTime + finalDuration);
-      }
-    };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
-    interactionType,
-    tonalQuality,
-    envelope,
-    timbre,
-    pitch,
-    emotion,
-    beatCount,
-    beatDelay,
-  ]);
+  }, [interactionType, tonalQuality, envelope, timbre, pitch, emotion, beatCount, beatDelay]);
 
-  const handlePlay = (blob) => {
-    if (!blob || blob.size === 0) {
-      alert("No audio data to play.");
-      return;
-    }
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    audio.onended = () => URL.revokeObjectURL(url);
-    audio.onerror = (e) => {
-      alert(
-        "Audio playback failed. Try downloading and playing in a media player."
-      );
-      console.error("Audio playback error", e);
-    };
-    audio.play().catch((err) => {
-      alert("Audio playback failed: " + err.message);
-      console.error("Audio play() error", err);
-    });
-  };
-
-  // Generate configuration text content
-  const generateConfigText = (config) => {
-    return `UI Sound Generator Configuration
-=====================================
-
-Audio File: ${config.name || 'Unknown'}
-Generated: ${config.generatedAt}
-Key Pressed: ${config.key}
-Key Position: ${config.keyIndex + 1} of 26
-Progression Factor: ${(config.progressionFactor * 100).toFixed(1)}%
-
-Sound Settings:
---------------
-Interaction Type: ${config.settings.interactionType}
-Tonal Quality: ${config.settings.tonalQuality}
-Envelope: ${config.settings.envelope}
-Timbre/Texture: ${config.settings.timbre}
-Pitch: ${config.settings.pitch}
-Emotion: ${config.settings.emotion || '(none)'}
-Beat Count: ${config.settings.beatCount}
-Beat Delay: ${config.settings.beatDelay}ms
-
-Technical Details:
------------------
-Keyboard Layout: Q-W-E-R-T-Y-U-I-O-P, A-S-D-F-G-H-J-K-L, Z-X-C-V-B-N-M
-Key Progression: Left to right, top to bottom
-Frequency Range: Progressive based on key position
-Audio Format: OGG Vorbis
-
-Instructions to Recreate:
-------------------------
-1. Set the sound parameters as listed above
-2. Press the '${config.key}' key to generate the same sound
-3. The sound will be identical if all settings match
-
-Generated by UI Sound Generator
-Timestamp: ${config.timestamp}
-`;
-  };
-
-  // Download both audio and configuration files as a ZIP
-  const handleDownload = async (rec) => {
+  const handlePlay = async (blob, config = null) => {
     try {
-      const zip = new JSZip();
-      
-      // Add audio file to ZIP
-      zip.file(rec.name, rec.blob);
-      
-      // Add configuration file to ZIP
-      if (rec.config) {
-        const configText = generateConfigText({ ...rec.config, name: rec.name });
-        const configName = rec.name.replace('.ogg', '_config.txt');
-        zip.file(configName, configText);
-      }
-      
-      // Generate ZIP file
-      const zipBlob = await zip.generateAsync({ type: "blob" });
-      const zipName = rec.name.replace('.ogg', '_package.zip');
-      
-      // Download ZIP file
-      saveAs(zipBlob, zipName);
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      await audio.play();
+      audio.onended = () => URL.revokeObjectURL(audioUrl);
     } catch (error) {
-      console.error('Error creating download package:', error);
-      // Fallback to separate downloads if ZIP creation fails
-      saveAs(rec.blob, rec.name);
-      if (rec.config) {
-        const configText = generateConfigText({ ...rec.config, name: rec.name });
-        const configBlob = new Blob([configText], { type: 'text/plain' });
-        const configName = rec.name.replace('.ogg', '_config.txt');
-        saveAs(configBlob, configName);
-      }
+      console.error('Error playing audio:', error);
+      alert('Unable to play audio. Please try generating a new sound.');
     }
   };
 
-  // Save a sound to the saved list
-  const handleSaveSound = async (rec) => {
-    console.log('Attempting to save sound:', rec.name);
-    setIsSaving(true);
-    
-    // Check for duplicates
-    const isDuplicate = savedSounds.some(
-      (s) => s.name === rec.name && s.blob.size === rec.blob.size
-    );
-    if (isDuplicate) {
-      console.log('Sound already exists, skipping save');
-      setIsSaving(false);
-      return;
-    }
+  const handleDownload = (rec) => {
+    const url = URL.createObjectURL(rec.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = rec.name;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
+  const handleSaveSound = async (rec) => {
+    setIsSaving(true);
     try {
-      console.log('Converting blob to base64...');
-      // Convert blob to base64 for the new sound
       const base64Data = await blobToBase64(rec.blob);
-      console.log('Base64 conversion successful, length:', base64Data.length);
-      
       const soundWithData = {
         name: rec.name,
         blob: rec.blob,
         blobData: base64Data,
-        config: rec.config, // Include configuration data
+        config: rec.config,
         timestamp: Date.now()
       };
-
-      console.log('Setting saved sounds state, count:', savedSounds.length + 1);
       setSavedSounds(prev => {
         const newSavedSounds = [...prev, soundWithData];
-        
-        // Save to localStorage synchronously after state update
-        setTimeout(async () => {
-          try {
-            console.log('Saving to localStorage...');
-            await saveSoundsToStorage(newSavedSounds);
-            console.log('Save to localStorage completed');
-          } catch (error) {
-            console.error('Error saving to localStorage:', error);
-          }
-        }, 0);
-        
+        saveSoundsToStorage(newSavedSounds);
         return newSavedSounds;
       });
-      
     } catch (error) {
       console.error('Error saving sound:', error);
     } finally {
@@ -652,8 +523,6 @@ Timestamp: ${config.timestamp}
   const handleDeleteSavedSound = async (index) => {
     const newSaved = savedSounds.filter((_, i) => i !== index);
     setSavedSounds(newSaved);
-    
-    // Update localStorage
     if (newSaved.length > 0) {
       await saveSoundsToStorage(newSaved);
     } else {
@@ -667,398 +536,311 @@ Timestamp: ${config.timestamp}
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        background: `linear-gradient(135deg, ${theme.palette.primary.light}15 0%, ${theme.palette.secondary.light}15 100%)`,
-        py: 4,
-        px: 2,
-      }}
-    >
-      <Container maxWidth="lg">
-        <Box sx={{ textAlign: 'center', mb: 6 }}>
-                      <Typography
-              variant="h3"
-              component="h1"
-              sx={{
-              fontWeight: 700,
-              color: theme.palette.primary.main,
-              mb: 2,
-              textShadow: '0 2px 4px rgba(0,0,0,0.1)',
-            }}
-          >
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 p-4">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-primary mb-4">
             UI Sound Generator
-          </Typography>
-          <Typography variant="h6" color="text.secondary" sx={{ mb: 1 }}>
-            Press keys <Chip label="Q→M" size="small" color="primary" /> to generate progressive UI sound effects.
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Sounds progress from low to high pitch across the keyboard layout (Q-W-E-R-T-Y-U-I-O-P, A-S-D-F-G-H-J-K-L, Z-X-C-V-B-N-M).
-          </Typography>
-        </Box>
+          </h1>
+          <p className="text-lg text-muted-foreground mb-2">
+            Press keys <Badge variant="outline">Q→M</Badge> to generate progressive UI sound effects.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Sounds progress from low to high pitch across the keyboard layout.
+          </p>
+        </div>
 
         {/* Controls Section */}
-        <Paper
-          elevation={4}
-          sx={{
-            p: 3,
-            mb: 4,
-            background: 'rgba(255, 255, 255, 0.9)',
-            backdropFilter: 'blur(10px)',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12)',
-          }}
-        >
-          <Box
-            sx={{
-              display: 'grid',
-              gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)', lg: 'repeat(6, 1fr)' },
-              gap: 2,
-            }}
-          >
-            <FormControl fullWidth size="small">
-              <InputLabel>Interaction Type</InputLabel>
-              <Select
-                value={interactionType}
-                onChange={(e) => setInteractionType(e.target.value)}
-                label="Interaction Type"
-              >
-                {INTERACTION_TYPES.map((opt) => (
-                  <MenuItem key={opt} value={opt}>
-                    {opt}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5" />
+              Sound Parameters
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="interaction-type">Interaction Type</Label>
+                <Select value={interactionType} onValueChange={setInteractionType}>
+                  <SelectTrigger id="interaction-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {INTERACTION_TYPES.map((type) => (
+                      <SelectItem key={type} value={type}>
+                        {type}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <FormControl fullWidth size="small">
-              <InputLabel>Tonal Quality</InputLabel>
-              <Select
-                value={tonalQuality}
-                onChange={(e) => setTonalQuality(e.target.value)}
-                label="Tonal Quality"
-              >
-                {TONAL_QUALITIES.map((opt) => (
-                  <MenuItem key={opt} value={opt}>
-                    {opt}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+              <div className="space-y-2">
+                <Label htmlFor="tonal-quality">Tonal Quality</Label>
+                <Select value={tonalQuality} onValueChange={setTonalQuality}>
+                  <SelectTrigger id="tonal-quality">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TONAL_QUALITIES.map((quality) => (
+                      <SelectItem key={quality} value={quality}>
+                        {quality}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <FormControl fullWidth size="small">
-              <InputLabel>Envelope</InputLabel>
-              <Select
-                value={envelope}
-                onChange={(e) => setEnvelope(e.target.value)}
-                label="Envelope"
-              >
-                {ENVELOPES.map((opt) => (
-                  <MenuItem key={opt} value={opt}>
-                    {opt}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+              <div className="space-y-2">
+                <Label htmlFor="envelope">Envelope</Label>
+                <Select value={envelope} onValueChange={setEnvelope}>
+                  <SelectTrigger id="envelope">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ENVELOPES.map((env) => (
+                      <SelectItem key={env} value={env}>
+                        {env}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <FormControl fullWidth size="small">
-              <InputLabel>Timbre / Texture</InputLabel>
-              <Select
-                value={timbre}
-                onChange={(e) => setTimbre(e.target.value)}
-                label="Timbre / Texture"
-              >
-                {TIMBRES.map((opt) => (
-                  <MenuItem key={opt} value={opt}>
-                    {opt}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+              <div className="space-y-2">
+                <Label htmlFor="timbre">Timbre / Texture</Label>
+                <Select value={timbre} onValueChange={setTimbre}>
+                  <SelectTrigger id="timbre">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TIMBRES.map((timb) => (
+                      <SelectItem key={timb} value={timb}>
+                        {timb}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <FormControl fullWidth size="small">
-              <InputLabel>Pitch</InputLabel>
-              <Select
-                value={pitch}
-                onChange={(e) => setPitch(e.target.value)}
-                label="Pitch / Frequency Range"
-              >
-                {PITCHES.map((opt) => (
-                  <MenuItem key={opt} value={opt}>
-                    {opt}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+              <div className="space-y-2">
+                <Label htmlFor="pitch">Pitch</Label>
+                <Select value={pitch} onValueChange={setPitch}>
+                  <SelectTrigger id="pitch">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PITCHES.map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {p}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <FormControl fullWidth size="small">
-              <InputLabel>Emotion</InputLabel>
-              <Select
-                value={emotion}
-                onChange={(e) => setEmotion(e.target.value)}
-                label="Emotion / Feedback Intent"
-              >
-                {EMOTIONS.map((opt) => (
-                  <MenuItem key={opt} value={opt || "(none)"}>
-                    {opt || "(none)"}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+              <div className="space-y-2">
+                <Label htmlFor="emotion">Emotion</Label>
+                <Select value={emotion} onValueChange={setEmotion}>
+                  <SelectTrigger id="emotion">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {EMOTIONS.map((emo) => (
+                      <SelectItem key={emo} value={emo}>
+                        {emo === "none" ? "(none)" : emo}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <FormControl fullWidth size="small" sx={{ gridColumn: { lg: 'span 2' } }}>
-              <Button
-                variant="outlined"
-                onClick={() => setBeatDialogOpen(true)}
-                sx={{
-                  justifyContent: 'flex-start',
-                  textTransform: 'none',
-                  height: '40px',
-                  borderColor: 'rgba(0, 0, 0, 0.23)',
-                  color: 'rgba(0, 0, 0, 0.87)',
-                  fontSize: '0.875rem',
-                  px: 2,
-                  py: 1,
-                  '&:hover': {
-                    borderColor: 'rgba(0, 0, 0, 0.87)',
-                  },
-                }}
-                fullWidth
-              >
-                {beatCount} beat{beatCount > 1 ? 's' : ''} • {beatDelay}ms
-              </Button>
-            </FormControl>
-                      </Box>
-        </Paper>
-
-        {/* Beat Settings Dialog */}
-        <Dialog open={beatDialogOpen} onClose={() => setBeatDialogOpen(false)} maxWidth={false}>
-          <Box sx={{ width: 300 }}>
-            <DialogTitle>Beats Settings</DialogTitle>
-            <DialogContent sx={{ px: 2, pb: 2, p: 2 }}>
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle1" sx={{ mb: 1 }}>Beats Count</Typography>
-              <TextField
-                type="number"
-                value={beatCount}
-                onChange={e => setBeatCount(Math.max(1, Number(e.target.value)))}
-                inputProps={{ min: 1 }}
-                size="small"
-                fullWidth
-                label="Number of beats"
-              />
-            </Box>
-            <Box>
-              <Typography variant="subtitle1" sx={{ mb: 1 }}>Delay</Typography>
-              <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-                <Box sx={{ width: 'calc(100% - 30px)', px: 2 }}>
-                  <Slider
-                    value={beatDelay}
-                    min={100}
-                    max={1000}
-                    step={10}
-                    onChange={(_, v) => setBeatDelay(v)}
-                    valueLabelDisplay="auto"
-                    marks={[{ value: 100, label: '100ms' }, { value: 1000, label: '1000ms' }]}
-                  />
-                </Box>
-              </Box>
-            </Box>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setBeatDialogOpen(false)} color="secondary">Cancel</Button>
-            <Button onClick={() => setBeatDialogOpen(false)} color="primary" variant="contained">Save</Button>
-          </DialogActions>
-            </Box>
-        </Dialog>
+              <div className="space-y-2 lg:col-span-2">
+                <Label>Beat Settings</Label>
+                <Dialog open={beatDialogOpen} onOpenChange={setBeatDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start">
+                      {beatCount} beat{beatCount > 1 ? 's' : ''} • {beatDelay}ms
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle>Beat Settings</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="beat-count">Beat Count</Label>
+                        <Input
+                          id="beat-count"
+                          type="number"
+                          min="1"
+                          value={beatCount}
+                          onChange={(e) => setBeatCount(Math.max(1, Number(e.target.value)))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="beat-delay">Delay: {beatDelay}ms</Label>
+                        <Slider
+                          id="beat-delay"
+                          min={100}
+                          max={1000}
+                          step={10}
+                          value={[beatDelay]}
+                          onValueChange={(value) => setBeatDelay(value[0])}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Sounds Section */}
-        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 3 }}>
+        <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
           {/* Generated Sounds List */}
-          <Card elevation={4} sx={{ 
-            flex: { xs: 1, lg: 6 },
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12)',
-          }}>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Headphones color="primary" />
-                  <Typography variant="h6" color="primary">
-                    Generated UI Sounds
-                  </Typography>
-                </Box>
+          <Card className="lg:col-span-6">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <Headphones className="h-5 w-5" />
+                  Generated UI Sounds
+                </CardTitle>
                 <Button
-                  variant="outlined"
-                  color="error"
-                  startIcon={<Clear />}
+                  variant="outline"
+                  size="sm"
                   onClick={() => setRecordings([])}
                   disabled={recordings.length === 0}
-                  size="small"
                 >
+                  <Trash2 className="h-4 w-4 mr-2" />
                   Clear List
                 </Button>
-              </Box>
-              
-              <Box sx={{ maxHeight: '60vh', overflow: 'auto' }}>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="max-h-96 overflow-auto space-y-2">
                 {recordings.length === 0 ? (
-                  <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
-                    <Typography variant="body1">
-                      No sounds generated yet.
-                    </Typography>
-                    <Typography variant="body2">
-                      Press a key to get started!
-                    </Typography>
-                  </Box>
+                  <div className="text-center py-8 text-muted-foreground">
+                    <p className="text-lg">No sounds generated yet.</p>
+                    <p className="text-sm">Press a key to get started!</p>
+                  </div>
                 ) : (
-                  <List>
-                    {recordings.map((rec, idx) => (
-                      <ListItem
-                        key={idx}
-                        sx={{
-                          mb: 1,
-                          bgcolor: 'primary.50',
-                          borderRadius: 1,
-                          border: '1px solid',
-                          borderColor: 'primary.100',
-                          '&:hover': {
-                            bgcolor: 'primary.100',
-                          },
-                        }}
-                        secondaryAction={
-                          <Box sx={{ display: 'flex', gap: 1 }}>
-                            <IconButton
-                              onClick={() => handlePlay(rec.blob)}
-                              color="primary"
-                              size="small"
-                            >
-                              <PlayArrow />
-                            </IconButton>
-                            <IconButton
-                              onClick={() => handleDownload(rec)}
-                              color="primary"
-                              size="small"
-                            >
-                              <Download />
-                            </IconButton>
-                            <IconButton
-                              onClick={() => handleSaveSound(rec)}
-                              color="success"
-                              size="small"
-                              disabled={isSaving || savedSounds.some(
-                                (s) => s.name === rec.name && s.blob.size === rec.blob.size
-                              )}
-                            >
-                              <Save />
-                            </IconButton>
-                          </Box>
-                        }
-                      >
-                        <ListItemText
-                          primary={rec.name}
-                          primaryTypographyProps={{
-                            variant: 'body2',
-                            fontFamily: 'monospace',
-                            color: 'primary.main',
-                          }}
-                        />
-                      </ListItem>
-                    ))}
-                  </List>
+                  recordings.map((rec, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between p-3 bg-primary/5 rounded-lg border border-primary/10"
+                    >
+                      <div className="flex-1">
+                        <p className="font-mono text-sm text-primary font-medium">
+                          {rec.name}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handlePlay(rec.blob, rec.config)}
+                        >
+                          <Play className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDownload(rec)}
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleSaveSound(rec)}
+                          disabled={isSaving}
+                        >
+                          <Save className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))
                 )}
-              </Box>
+              </div>
             </CardContent>
           </Card>
 
           {/* Saved Sounds List */}
-          <Card elevation={4} sx={{ 
-            bgcolor: 'white', 
-            flex: { xs: 1, lg: 4 },
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12)',
-          }}>
+          <Card className="lg:col-span-4">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Star className="h-5 w-5" />
+                Saved Sounds
+              </CardTitle>
+            </CardHeader>
             <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-                <Star color="primary" />
-                <Typography variant="h6" color="primary">
-                  Saved Sounds
-                </Typography>
-              </Box>
-              
-              <Box sx={{ maxHeight: '60vh', overflow: 'auto' }}>
+              <div className="max-h-96 overflow-auto space-y-2">
                 {savedSounds.length === 0 ? (
-                  <Box sx={{ textAlign: 'center', py: 2, color: 'text.secondary' }}>
-                    <Typography variant="body2">
-                      No sounds saved yet.
-                    </Typography>
-                  </Box>
+                  <div className="text-center py-4 text-muted-foreground">
+                    <p className="text-sm">No sounds saved yet.</p>
+                  </div>
                 ) : (
-                  <List>
-                    {savedSounds.map((rec, idx) => (
-                      <ListItem
-                        key={idx}
-                        sx={{
-                          mb: 1,
-                          bgcolor: 'success.50',
-                          borderRadius: 1,
-                          border: '1px solid',
-                          borderColor: 'success.100',
-                          '&:hover': {
-                            bgcolor: 'success.100',
-                          },
-                        }}
-                        secondaryAction={
-                          <Box sx={{ display: 'flex', gap: 1 }}>
-                            <IconButton
-                              onClick={() => handlePlay(rec.blob)}
-                              color="success"
-                              size="small"
-                            >
-                              <PlayArrow />
-                            </IconButton>
-                            <IconButton
-                              onClick={() => handleDownload(rec)}
-                              color="success"
-                              size="small"
-                            >
-                              <Download />
-                            </IconButton>
-                            <IconButton
-                              onClick={() => handleDeleteSavedSound(idx)}
-                              color="error"
-                              size="small"
-                            >
-                              <Delete />
-                            </IconButton>
-                          </Box>
-                        }
-                      >
-                        <ListItemText
-                          primary={rec.name}
-                          primaryTypographyProps={{
-                            variant: 'body2',
-                            fontFamily: 'monospace',
-                            color: 'success.main',
-                          }}
-                        />
-                      </ListItem>
-                    ))}
-                  </List>
+                  savedSounds.map((rec, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200"
+                    >
+                      <div className="flex-1">
+                        <p className="font-mono text-sm text-green-700 font-medium">
+                          {rec.name}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handlePlay(rec.blob, rec.config)}
+                        >
+                          <Play className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDownload(rec)}
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteSavedSound(idx)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))
                 )}
-              </Box>
-              <Divider sx={{ my: 1 }} />
-              <Button
-                variant="outlined"
-                color="error"
-                startIcon={<Clear />}
-                onClick={handleClearSavedSounds}
-                disabled={savedSounds.length === 0}
-                size="small"
-                fullWidth
-              >
-                Clear All Saved Sounds
-              </Button>
+              </div>
+              {savedSounds.length > 0 && (
+                <>
+                  <Separator className="my-4" />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleClearSavedSounds}
+                    className="w-full"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Clear All Saved Sounds
+                  </Button>
+                </>
+              )}
             </CardContent>
           </Card>
-        </Box>
-      </Container>
-    </Box>
+        </div>
+      </div>
+    </div>
   );
 }
+
